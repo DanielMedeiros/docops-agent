@@ -1,0 +1,26 @@
+{
+  "name": "docops-agent",
+  "version": "1.0.0",
+  "description": "Ideia inicial é que o DocOps Agent sera uma plataforma em que uma empresa disponibiliza documentos internos — manuais, políticas, contratos, procedimentos, documentação técnica.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DanielMedeiros/docops-agent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/DanielMedeiros/docops-agent/issues"
+  },
+  "homepage": "https://github.com/DanielMedeiros/docops-agent#readme",
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
