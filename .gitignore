@@ -1,3 +1,16 @@
+
+#general
+
+dist/
+build/
+.env
+.env.local
+*.log
+.DS_Store
+.turbo/
+tmp/
+uploads/
+
 # Logs
 logs
 *.log

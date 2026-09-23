@@ -3,8 +3,18 @@
   "version": "1.0.0",
   "description": "Ideia inicial é que o DocOps Agent sera uma plataforma em que uma empresa disponibiliza documentos internos — manuais, políticas, contratos, procedimentos, documentação técnica.",
   "main": "index.js",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:worker": "npm run dev --workspace=apps/worker",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "db:migrate": "npm run migrate --workspace=packages/database",
+    "db:seed": "npm run seed --workspace=packages/database"
   },
   "repository": {
     "type": "git",
