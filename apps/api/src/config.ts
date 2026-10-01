@@ -1,5 +1,13 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
+
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
+
+// Carrega .env do diretório atual e também da raiz do monorepo
+dotenv.config();
+dotenv.config({ path: resolve(__dirname, "../../../.env") });
 
 const configSchema = z.object({
     NODE_ENV: z
