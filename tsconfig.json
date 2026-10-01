@@ -7,7 +7,7 @@
       "ES2022"
     ],
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -17,6 +17,9 @@
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
+      "@config": [
+        "packages/config/src/index.ts"
+      ],
       "@config/*": [
         "packages/config/src/*"
       ],
