@@ -1,0 +1,43 @@
+name: "CodeQL - Security Analysis"
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '30 1 * * 0' # Todo domingo à 01:30 UTC
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: 🛡️ CodeQL SAST Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'javascript-typescript' ]
+
+    steps:
+    - name: 📥 Checkout do repositório
+      uses: actions/checkout@v4
+
+    - name: ⚙️ Inicializar CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        queries: security-extended,security-and-quality
+
+    - name: 🔨 AutoBuild
+      uses: github/codeql-action/autobuild@v3
+
+    - name: 🔍 Executar Análise CodeQL
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"

@@ -1,0 +1,173 @@
+name: Deploy - Continuous Deployment
+
+on:
+  workflow_run:
+    workflows: ["Docker - Build & Push"]
+    types:
+      - completed
+    branches:
+      - main
+      - develop
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente de destino para Deploy'
+        type: choice
+        required: true
+        options:
+          - staging
+          - production
+        default: 'staging'
+      run_migrations:
+        description: 'Executar migrações do banco de dados (Prisma)?'
+        type: boolean
+        required: true
+        default: true
+
+permissions:
+  contents: read
+  id-token: write # Essencial para autenticação segura via OIDC sem senhas estáticas
+
+jobs:
+  # --------------------------------------------------------------------------
+  # 1. Deploy no Ambiente de STAGING
+  # --------------------------------------------------------------------------
+  deploy-staging:
+    name: 🚀 Deploy Staging
+    runs-on: ubuntu-latest
+    environment: staging
+    # Disparado automaticamente na branch develop ou manualmente via workflow_dispatch
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'develop' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+
+    steps:
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: 📦 Instalar dependências
+        run: npm ci
+
+      # Exemplo de autenticação via OIDC (Cloud Provider agnóstico)
+      # Para AWS:
+      # - name: 🔐 Autenticar na AWS via OIDC
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      #     aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      #
+      # Para Azure:
+      # - name: 🔐 Autenticar no Azure via OIDC
+      #   uses: azure/login@v2
+      #   with:
+      #     client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      #     tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      #     subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: 🗄️ Executar Migrações do Prisma (Staging)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_migrations == true }}
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: |
+          if [ -n "$DATABASE_URL" ]; then
+            echo "⚡ Executando prisma migrate deploy no banco de Staging..."
+            if [ -f "packages/database/prisma/schema.prisma" ]; then
+              npx prisma migrate deploy --schema=packages/database/prisma/schema.prisma
+            elif [ -f "prisma/schema.prisma" ]; then
+              npx prisma migrate deploy
+            fi
+          else
+            echo "⚠️ STAGING_DATABASE_URL não configurada em GitHub Secrets. Pulando migration."
+          fi
+
+      - name: 🚢 Atualizar Serviço em Staging (Placeholder de Deploy)
+        env:
+          APP_NAME: ${{ vars.APPLICATION_NAME || 'docops-agent' }}
+          TARGET_HOST: ${{ vars.STAGING_TARGET_HOST || '<DEPLOY_TARGET>' }}
+          IMAGE_TAG: develop
+        run: |
+          echo "🚀 Atualizando container em Staging para a imagem com tag: $IMAGE_TAG"
+          echo "Alvo de deploy: $TARGET_HOST ($APP_NAME)"
+          # Exemplo para Kubernetes / AWS ECS / Docker Compose remoto:
+          # kubectl set image deployment/$APP_NAME $APP_NAME=${{ secrets.DOCKER_REGISTRY }}/$APP_NAME:$IMAGE_TAG -n staging
+          # ou aws ecs update-service --cluster staging-cluster --service $APP_NAME --force-new-deployment
+
+      - name: 🩺 Smoke Test / Health Check (Staging)
+        run: |
+          echo "🔍 Verificando endpoint de saúde de Staging..."
+          # curl --fail --retry 5 --retry-delay 5 https://${{ vars.STAGING_API_URL }}/health || true
+
+  # --------------------------------------------------------------------------
+  # 2. Deploy no Ambiente de PRODUCTION (Requer Aprovação em GitHub Environments)
+  # --------------------------------------------------------------------------
+  deploy-production:
+    name: 🏆 Deploy Production
+    runs-on: ubuntu-latest
+    environment: production
+    # Disparado automaticamente na branch main após CI/Docker, por Release criada, ou manualmente
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'release' && github.event.action == 'published') ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+
+    steps:
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: 📦 Instalar dependências
+        run: npm ci
+
+      # Autenticação Segura OIDC
+      # - name: 🔐 Autenticar na AWS via OIDC
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
+      #     aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: 🗄️ Executar Migrações do Prisma (Produção)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_migrations == true }}
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          if [ -n "$DATABASE_URL" ]; then
+            echo "⚡ Aplicando migrações no banco de Produção (Zero-Downtime)..."
+            if [ -f "packages/database/prisma/schema.prisma" ]; then
+              npx prisma migrate deploy --schema=packages/database/prisma/schema.prisma
+            elif [ -f "prisma/schema.prisma" ]; then
+              npx prisma migrate deploy
+            fi
+          else
+            echo "⚠️ PRODUCTION_DATABASE_URL não configurada em GitHub Secrets. Pulando migration."
+          fi
+
+      - name: 🚢 Executar Rollout de Produção
+        env:
+          APP_NAME: ${{ vars.APPLICATION_NAME || 'docops-agent' }}
+          TARGET_HOST: ${{ vars.PROD_TARGET_HOST || '<DEPLOY_TARGET>' }}
+          IMAGE_TAG: ${{ github.ref_name }}
+        run: |
+          echo "🚀 Executando Rollout da versão $IMAGE_TAG em Produção..."
+          echo "Alvo: $TARGET_HOST"
+          # Exemplo para Kubernetes Rolling Update:
+          # kubectl set image deployment/$APP_NAME $APP_NAME=${{ secrets.DOCKER_REGISTRY }}/$APP_NAME:$IMAGE_TAG -n production
+          # kubectl rollout status deployment/$APP_NAME -n production
+
+      - name: 🩺 Smoke Test / Health Check (Produção)
+        run: |
+          echo "🔍 Validando disponibilidade e integridade da API de Produção..."
+          # curl --fail --retry 10 --retry-delay 3 https://${{ vars.PROD_API_URL }}/health

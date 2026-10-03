@@ -1,0 +1,45 @@
+# Dependências locais e builds
+node_modules
+dist
+build
+out
+.turbo
+.next
+
+# Controle de versão e CI/CD
+.git
+.gitignore
+.github
+
+# Ambientes e segredos
+.env
+.env.*
+!.env.example
+
+# Testes, cobertura e relatórios
+coverage
+.nyc_output
+test
+tests
+**/*.spec.ts
+**/*.test.ts
+*.ps1
+
+# Logs e arquivos temporários
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+tmp
+temp
+
+# Configurações de IDE e SO
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+*.swp
+
+# Documentação extra
+README.md
+docs

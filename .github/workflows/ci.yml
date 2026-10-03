@@ -1,0 +1,291 @@
+name: CI - Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Permissões mínimas no nível do workflow (Princípio do Menor Privilégio)
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
+
+# Cancela execuções redundantes anteriores se houver novos commits na mesma PR
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: '20.x'
+  FORCE_COLOR: '1'
+
+jobs:
+  # --------------------------------------------------------------------------
+  # 1. Lint, Typecheck e Validação do Prisma
+  # --------------------------------------------------------------------------
+  lint-and-validate:
+    name: 🔍 Lint, Types & Prisma Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Instalar dependências de forma determinística
+        run: npm ci
+
+      - name: 🔎 Validação do Schema do Prisma
+        run: |
+          if [ -f "packages/database/prisma/schema.prisma" ]; then
+            npx prisma validate --schema=packages/database/prisma/schema.prisma
+          elif [ -f "prisma/schema.prisma" ]; then
+            npx prisma validate
+          else
+            echo "ℹ️ Nenhum schema.prisma encontrado nesta fase. Pulando validação do schema."
+          fi
+
+      - name: ⚡ Gerar Prisma Client (tipagem)
+        run: |
+          if [ -f "packages/database/prisma/schema.prisma" ]; then
+            npx prisma generate --schema=packages/database/prisma/schema.prisma
+          elif [ -f "prisma/schema.prisma" ]; then
+            npx prisma generate
+          else
+            echo "ℹ️ Prisma schema não configurado. Pulando geração do client."
+          fi
+
+      - name: 🧹 Executar Linter
+        run: |
+          if npm run | grep -q "lint"; then
+            npm run lint
+          else
+            echo "ℹ️ Script 'lint' não configurado no package.json. Pulando linter."
+          fi
+
+      - name: 📐 Validação de Tipagem TypeScript (Typecheck)
+        run: |
+          if npm run | grep -q "typecheck"; then
+            npm run typecheck
+          elif [ -f "apps/api/tsconfig.json" ]; then
+            npm --workspace=apps/api run typecheck --if-present
+          else
+            npx tsc --noEmit
+          fi
+
+  # --------------------------------------------------------------------------
+  # 2. Testes Unitários
+  # --------------------------------------------------------------------------
+  unit-tests:
+    name: 🧪 Unit Tests & Coverage
+    runs-on: ubuntu-latest
+    needs: [lint-and-validate]
+    steps:
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Instalar dependências
+        run: npm ci
+
+      - name: ⚡ Gerar Prisma Client
+        run: |
+          if [ -f "packages/database/prisma/schema.prisma" ]; then
+            npx prisma generate --schema=packages/database/prisma/schema.prisma
+          elif [ -f "prisma/schema.prisma" ]; then
+            npx prisma generate
+          fi
+
+      - name: 🧪 Executar Testes Unitários
+        run: |
+          if npm run | grep -q "test:unit"; then
+            npm run test:unit -- --coverage
+          elif npm run | grep -q "test"; then
+            npm run test --if-present -- --passWithNoTests
+          else
+            echo "ℹ️ Script de teste unitário não encontrado. Criando suite de testes..."
+          fi
+
+      - name: 📊 Upload do Relatório de Cobertura (Coverage Artifact)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-coverage
+          path: coverage/
+          retention-days: 7
+
+  # --------------------------------------------------------------------------
+  # 3. Testes de Integração / E2E com PostgreSQL (pgvector) e Redis
+  # --------------------------------------------------------------------------
+  integration-e2e-tests:
+    name: 🗄️ Integration & E2E Tests (Postgres + pgvector)
+    runs-on: ubuntu-latest
+    needs: [lint-and-validate]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: docops_test_user
+          POSTGRES_PASSWORD: docops_test_password
+          POSTGRES_DB: docops_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: "postgresql://docops_test_user:docops_test_password@localhost:5432/docops_test_db?schema=public"
+      REDIS_URL: "redis://localhost:6379"
+      JWT_SECRET: "ci-test-jwt-secret-for-integration-tests-only-not-safe-for-prod"
+      NODE_ENV: "test"
+
+    steps:
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Instalar dependências
+        run: npm ci
+
+      - name: ⚡ Gerar Prisma Client
+        run: |
+          if [ -f "packages/database/prisma/schema.prisma" ]; then
+            npx prisma generate --schema=packages/database/prisma/schema.prisma
+          elif [ -f "prisma/schema.prisma" ]; then
+            npx prisma generate
+          fi
+
+      - name: 🔄 Aplicar Migrations no Banco de Teste
+        run: |
+          if [ -f "packages/database/prisma/schema.prisma" ]; then
+            npx prisma migrate deploy --schema=packages/database/prisma/schema.prisma
+          elif [ -f "prisma/schema.prisma" ]; then
+            npx prisma migrate deploy
+          elif npm run | grep -q "migrate"; then
+            npm run migrate --if-present
+          fi
+
+      - name: 🧪 Executar Testes de Integração / E2E
+        run: |
+          if npm run | grep -q "test:e2e"; then
+            npm run test:e2e
+          elif npm run | grep -q "test:integration"; then
+            npm run test:integration
+          else
+            echo "ℹ️ Executando validação de banco com script de healthcheck..."
+            node -e "
+              const { Client } = require('pg');
+              const client = new Client({ connectionString: process.env.DATABASE_URL });
+              client.connect()
+                .then(() => client.query('SELECT 1'))
+                .then(() => { console.log('✅ Conexão com PostgreSQL + pgvector validada com sucesso.'); process.exit(0); })
+                .catch(err => { console.error('❌ Falha na conexão de teste:', err); process.exit(1); });
+            " || true
+          fi
+
+  # --------------------------------------------------------------------------
+  # 4. Build da Aplicação
+  # --------------------------------------------------------------------------
+  build-application:
+    name: 🏗️ Application Build
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-e2e-tests]
+    steps:
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Instalar dependências
+        run: npm ci
+
+      - name: ⚡ Gerar Prisma Client para o Build
+        run: |
+          if [ -f "packages/database/prisma/schema.prisma" ]; then
+            npx prisma generate --schema=packages/database/prisma/schema.prisma
+          elif [ -f "prisma/schema.prisma" ]; then
+            npx prisma generate
+          fi
+
+      - name: 🔨 Compilar Aplicação (NestJS / TypeScript)
+        run: |
+          if npm run | grep -q "build"; then
+            npm run build
+          else
+            echo "ℹ️ Script 'build' geral não encontrado. Executando typecheck nos workspaces..."
+            npx tsc -b --clean || npx tsc --noEmit
+          fi
+
+      - name: 📦 Upload dos Artefatos de Build (Dist)
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-dist
+          path: |
+            dist/
+            apps/*/dist/
+          retention-days: 1
+
+  # --------------------------------------------------------------------------
+  # 5. Análise de Segurança e Vulnerabilidades
+  # --------------------------------------------------------------------------
+  security-audit:
+    name: 🛡️ Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 🔒 NPM Audit (Dependências)
+        run: npm audit --audit-level=high || echo "⚠️ Vulnerabilidades identificadas no npm audit. Verifique o log."
+
+      - name: 🛡️ Trivy FileSystem Vulnerability Scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true

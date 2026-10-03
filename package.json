@@ -10,6 +10,8 @@
   "scripts": {
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:worker": "npm run dev --workspace=apps/worker",
+    "typecheck": "npm run typecheck --workspace=apps/api",
+    "build": "tsc -b --clean || tsc --noEmit",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
