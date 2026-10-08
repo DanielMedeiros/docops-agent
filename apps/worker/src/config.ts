@@ -1,52 +1,30 @@
-import dotenv from "dotenv";
+import { config as loadEnv } from "dotenv";
 import { resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const rootDir = resolve(__dirname, "../../../");
+const rootEnvPath = resolve(rootDir, ".env");
 
-// Carrega .env do diretório atual e também da raiz do monorepo
-dotenv.config();
-dotenv.config({ path: resolve(rootDir, ".env") });
+loadEnv({ path: rootEnvPath });
 
 const configSchema = z.object({
-    NODE_ENV: z
-        .enum(["development", "test", "production"])
-        .default("development"),
-
-    API_HOST: z.string().default("0.0.0.0"),
-
-    API_PORT: z.coerce.number().int().positive().default(3000),
-
     DATABASE_URL: z.string().min(1),
-
-    JWT_SECRET: z
-        .string()
-        .min(32, "JWT_SECRET deve possuir pelo menos 32 caracteres"),
-
-    JWT_EXPIRES_IN: z.string().default("8h"),
-
-    CORS_ORIGIN: z.string().default("*"),
-
+    REDIS_URL: z.string().min(1),
     UPLOAD_DIR: z.string().default("./uploads"),
-
-    LOG_LEVEL: z
-        .enum(["fatal", "error", "warn", "info", "debug", "trace"])
-        .default("info")
+    LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
 
 const parsedConfig = configSchema.safeParse(process.env);
 
 if (!parsedConfig.success) {
-    console.error("Configuração inválida:");
-
+    console.error("Configuração inválida no worker:");
     for (const [key, errors] of Object.entries(
         parsedConfig.error.flatten().fieldErrors
     )) {
         console.error(`- ${key}: ${errors?.join(", ")}`);
     }
-
     process.exit(1);
 }
 

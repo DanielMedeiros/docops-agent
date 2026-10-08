@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, readdir } from "node:fs/promises";
+import { resolve, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { config } from "../config.js";
@@ -8,24 +8,36 @@ const { Client } = pg;
 
 async function migrate(): Promise<void> {
     const client = new Client({
-        connectionString: config.DATABASE_URL
+        connectionString: config.DATABASE_URL,
     });
 
     await client.connect();
 
     try {
-        const __dirname = fileURLToPath(new URL(".", import.meta.url));
-        const rootDirectory = resolve(__dirname, "../../../..");
-        const migrationPath = resolve(
-            rootDirectory,
-            "migrations/001_initial_schema.sql"
-        );
+        const currentFilePath = fileURLToPath(import.meta.url);
+        const projectRoot = resolve(currentFilePath, "../../../../..");
+        const migrationsDir = resolve(projectRoot, "migrations");
 
-        const migration = await readFile(migrationPath, "utf8");
+        const files = await readdir(migrationsDir);
+        const sqlFiles = files
+            .filter((f) => extname(f) === ".sql")
+            .sort();
 
-        await client.query(migration);
+        if (sqlFiles.length === 0) {
+            console.log("Nenhuma migração encontrada.");
+            return;
+        }
 
-        console.log("Migração executada com sucesso.");
+        for (const file of sqlFiles) {
+            const filePath = resolve(migrationsDir, file);
+            const sql = await readFile(filePath, "utf8");
+
+            console.log(`Executando migração: ${file}`);
+            await client.query(sql);
+            console.log(`Migração ${file} concluída.`);
+        }
+
+        console.log("Todas as migrações foram executadas.");
     } finally {
         await client.end();
     }

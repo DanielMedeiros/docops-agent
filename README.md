@@ -6,7 +6,7 @@ Assistente de documentação com RAG e ações seguras. Este projeto será desen
 
 - [x] **Fase 1 — Configuração do ambiente local**
 - [x] **Fase 2 — Autenticação, RBAC e estrutura base da API**
-- [ ] Fase 3 — Upload e processamento assíncrono de documentos
+- [x] **Fase 3 — Upload e processamento assíncrono de documentos**
 - [ ] Fase 4 — RAG com PostgreSQL e pgvector
 - [ ] Fase 5 — Chat com streaming
 - [ ] Fase 6 — Tool calling, validação e aprovação de ações
@@ -373,6 +373,187 @@ Acesso sem token bloqueado.
 
 ---
 
+# Fase 3 — Upload e processamento assíncrono de documentos
+
+## Objetivo
+
+Implementar a ingestão de arquivos e o pipeline assíncrono de processamento de documentos com filas no Redis, desacoplando o recebimento do arquivo na API da etapa pesada de extração de texto e segmentação em chunks:
+
+- **Upload multipart na API Fastify** via `@fastify/multipart` com validação de tipo MIME e controle de tamanho máximo.
+- **Modelagem relacional de documentos no PostgreSQL**: tabelas `documents` (armazenamento e status de processamento) e `document_chunks` (fragmentos de texto com metadados e suporte a vetor).
+- **Fila assíncrona com BullMQ + Redis**: desacoplamento do processamento com retentativas exponenciais automáticas e políticas de retenção de jobs.
+- **Worker dedicado (`apps/worker`)**: consumidor autônomo com concorrência configurável para processar jobs de documentos.
+- **Processador e extrator de texto**: suporte a arquivos Markdown (`text/markdown`), texto puro (`text/plain`), HTML (`text/html`) e PDF (`application/pdf`).
+- **Algoritmo de chunking deslizante**: segmentação de texto configurável (1000 caracteres por chunk com overlap de 200 caracteres) e cálculo estimado de tokens.
+- **Isolamento multi-tenant**: garantia de que documentos e chunks pertencem e são acessíveis apenas pela organização proprietária.
+
+## Estrutura do Worker e Módulo de Documentos
+
+```text
+apps/
+├── api/
+│   └── src/
+│       └── modules/
+│           └── documents/
+│               ├── documents.routes.ts     # Endpoints POST /documents, GET /documents, GET /documents/:id, GET /documents/:id/chunks
+│               ├── documents.schemas.ts    # Validação Zod de upload e tipos MIME permitidos
+│               └── documents.service.ts    # Lógica de upload, persistência e enfileiramento de jobs no BullMQ
+└── worker/
+    ├── src/
+    │   ├── processors/
+    │   │   └── document.processor.ts       # Extração de texto, chunking e persistência dos fragmentos
+    │   ├── config.ts                       # Validação de variáveis de ambiente com Zod (Redis, DB, Uploads)
+    │   ├── queue.ts                        # Instância compartilhada da fila BullMQ ('document-processing')
+    │   └── worker.ts                       # Bootstrap do worker, listeners de ciclo de vida e eventos de job
+    ├── tsconfig.json
+    └── package.json
+```
+
+## Banco de Dados e Migrações
+
+### 1. Executar a migração de documentos
+
+Aplica o arquivo `migrations/002_documents.sql`:
+
+```powershell
+npm run migrate --workspace=apps/api
+```
+
+Tabelas criadas:
+
+- `documents`: Metadados do documento (`id`, `organization_id`, `uploaded_by`, `original_name`, `stored_name`, `mime_type`, `file_size_bytes`, `status`, `error_message`, `metadata`, `created_at`, `updated_at`).
+  - Status suportados: `pending`, `processing`, `completed`, `failed`.
+- `document_chunks`: Fragmentos de texto resultantes do chunking (`id`, `document_id`, `organization_id`, `chunk_index`, `content`, `token_count`, `metadata`, `embedding`, `created_at`).
+  - Restrição única composta: `UNIQUE (document_id, chunk_index)`.
+  - Índices criados para consultas eficientes por `organization_id`, `document_id` e `status`.
+
+## Endpoints de Documentos
+
+| Método | Endpoint | Protegido? | Permissão / Requisito | Descrição |
+| --- | --- | :---: | --- | --- |
+| `POST` | `/documents` | Sim | `documents:create` | Upload multipart (`file`) do documento e enfileiramento para processamento |
+| `GET` | `/documents` | Sim | `documents:read` | Lista todos os documentos pertencentes à organização |
+| `GET` | `/documents/:documentId` | Sim | `documents:read` | Retorna os detalhes e status de processamento de um documento |
+| `GET` | `/documents/:documentId/chunks` | Sim | `documents:read` | Lista os chunks extraídos e ordenados por índice do documento |
+
+### Tipos de arquivos aceitos
+
+- `text/markdown` (`.md`)
+- `text/plain` (`.txt`)
+- `text/html` (`.html`)
+- `application/pdf` (`.pdf`)
+
+## Pipeline de Processamento Assíncrono
+
+```mermaid
+flowchart LR
+    A[Cliente / Upload] -->|POST /documents| B(Fastify API)
+    B -->|Grava arquivo| C[(Pasta uploads/)]
+    B -->|Salva status 'pending'| D[(PostgreSQL)]
+    B -->|Enfileira Job| E[Redis / BullMQ]
+    E -->|Consome Job| F(Worker)
+    F -->|Atualiza status 'processing'| D
+    F -->|Lê arquivo e extrai texto| C
+    F -->|Segmenta em Chunks| F
+    F -->|Grava document_chunks| D
+    F -->|Atualiza status 'completed'| D
+    F -->|Remove arquivo temporário| C
+```
+
+1. **Upload**: A API recebe o payload multipart, valida o MIME type com Zod, salva o arquivo no diretório compartilhado `uploads/` e insere o registro com status `pending`.
+2. **Enfileiramento**: Um job com identificador `process-document` é postado na fila `document-processing` no Redis via BullMQ.
+3. **Consumo**: O worker retira o job da fila, altera o status para `processing` e lê o arquivo em disco.
+4. **Extração e Chunking**: O texto é extraído e dividido em janelas de 1000 caracteres com sobreposição de 200 caracteres, calculando a contagem estimada de tokens.
+5. **Persistência**: Os chunks são inseridos em transação atômica no PostgreSQL em `document_chunks`.
+6. **Conclusão**: O documento tem seu status atualizado para `completed`, o arquivo temporário é removido e o job é finalizado com sucesso. Se houver falha, o status muda para `failed` com o log da mensagem de erro e política de retry do BullMQ.
+
+## Como executar a Fase 3
+
+### 1. Iniciar a API
+
+Em um terminal:
+
+```powershell
+npm run dev:api
+```
+
+### 2. Iniciar o Worker
+
+Em outro terminal:
+
+```powershell
+npm run dev:worker
+```
+
+### 3. Validar tipagem TypeScript de ambos os workspaces
+
+```powershell
+npm run typecheck --workspace=apps/api
+npm run typecheck --workspace=apps/worker
+```
+
+## Verificações da Fase 3
+
+O script `test-fase-3.ps1` automatiza o fluxo completo de teste de ponta a ponta da Fase 3:
+
+1. **Login com Administrador (`POST /auth/login`)**: Obtém o token JWT.
+2. **Criação de Documento Local**: Gera um arquivo Markdown sintético de teste com mais de 1200 caracteres.
+3. **Upload de Documento (`POST /documents`)**: Envia o arquivo via form multipart e valida o status inicial `pending`.
+4. **Processamento Assíncrono no Worker**: Aguarda o polling de status até transicionar para `completed`.
+5. **Validação de Chunks (`GET /documents/:id/chunks`)**: Confirma que os fragmentos de texto foram gerados e persistidos no banco.
+6. **Listagem de Documentos (`GET /documents`)**: Valida a recuperação da lista de documentos filtrada pelo tenant.
+7. **Segurança e Isolamento (`POST /documents` sem token)**: Garante bloqueio com HTTP 401 para requisições sem credenciais.
+
+### Executar o script da Fase 3
+
+Com a API e o Worker em execução:
+
+```powershell
+.\test-fase-3.ps1
+```
+
+Resultado confirmado:
+
+```text
+=== Teste 1: Login ===
+Login OK
+
+=== Teste 2: Criar arquivo de teste ===
+Arquivo criado
+
+=== Teste 3: Upload do documento ===
+Upload OK. Documento: 787f0d2c-49db-4a89-8c2a-eef9ea06e8c2
+
+=== Teste 4: Aguardar processamento ===
+Status: completed (2s)
+Processamento concluído
+
+=== Teste 5: Verificar chunks ===
+Chunks: 2
+
+=== Teste 6: Listar documentos ===
+Documentos listados: 3
+
+=== Teste 7: Upload sem token ===
+Bloqueado sem token
+
+=== Fase 3 validada ===
+```
+
+## Critério de conclusão da Fase 3
+
+- [x] Módulo de upload multipart configurado com validação por Zod e limitação de tamanho.
+- [x] Migração SQL `002_documents.sql` criando as tabelas `documents` e `document_chunks` com suporte ao `pgvector`.
+- [x] Fila assíncrona gerenciada com **BullMQ + Redis** com política de retentativas.
+- [x] Worker dedicado (`apps/worker`) executando de forma desacoplada com hot-reload e ciclo de vida de jobs.
+- [x] Algoritmo de extração de texto e chunking deslizante com cálculo de tokens.
+- [x] Endpoints CRUD e de chunks com proteção de autenticação e RBAC (`documents:create`, `documents:read`).
+- [x] O script `test-fase-3.ps1` termina com sucesso total.
+
+**Status: concluída.**
+
+---
+
 ## Próxima fase
 
-A **Fase 3** adicionará o módulo de upload de documentos (PDF, Markdown, TXT), filas assíncronas com **BullMQ + Redis**, worker dedicado para extração e chunking de texto.
+A **Fase 4** adicionará a geração de embeddings vetoriais com **OpenAI text-embedding-3-small**, indexação HNSW no **pgvector**, pipeline de busca semântica (vetorial + filtros relacionais por tenant) e re-ranking de contexto para o RAG.
