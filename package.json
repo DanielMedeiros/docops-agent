@@ -15,8 +15,8 @@
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
-    "db:migrate": "npm run migrate --workspace=packages/database",
-    "db:seed": "npm run seed --workspace=packages/database"
+    "db:migrate": "npm run migrate --workspace=apps/api",
+    "db:seed": "npm run seed --workspace=apps/api"
   },
   "repository": {
     "type": "git",
