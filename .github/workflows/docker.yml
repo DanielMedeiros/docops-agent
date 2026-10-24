@@ -65,7 +65,7 @@ jobs:
 
       - name: 🔨 Build e Push da Imagem com Cache de Layers (GHA)
         id: build-and-push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
