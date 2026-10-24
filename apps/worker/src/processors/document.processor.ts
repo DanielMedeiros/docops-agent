@@ -1,14 +1,45 @@
 import { readFile, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import pg from "pg";
+import { Queue } from "bullmq";
 import { config } from "../config.js";
 
 const { Client } = pg;
 
+const redisUrl = new URL(config.REDIS_URL);
+
+function createDocumentIndexQueue() {
+  return new Queue("document-processing", {
+    connection: {
+      host: redisUrl.hostname,
+      port: Number(redisUrl.port || 6379),
+      username: redisUrl.username || undefined,
+      password: redisUrl.password || undefined,
+      maxRetriesPerRequest: null,
+    },
+  });
+}
+
+let activeQueue = createDocumentIndexQueue();
+
+const documentIndexQueue = new Proxy(activeQueue, {
+  get(target, prop, receiver) {
+    if (prop === "close") {
+      return async () => {
+        await activeQueue.close();
+        activeQueue = createDocumentIndexQueue();
+      };
+    }
+    const val = Reflect.get(activeQueue, prop, receiver);
+    return typeof val === "function" ? val.bind(activeQueue) : val;
+  },
+});
+
 export interface DocumentJobData {
-    documentId: string;
-    storedName: string;
-    mimeType: string;
+  documentId: string;
+  organizationId: string;
+  storedName: string;
+  mimeType: string;
 }
 
 interface Chunk {
@@ -126,6 +157,11 @@ export async function processDocument(
 
         await client.query("COMMIT");
 
+        await documentIndexQueue.add("embed-document", {
+          documentId: jobData.documentId,
+          organizationId: jobData.organizationId,
+        });
+
         const filePath = resolve(config.UPLOAD_DIR, jobData.storedName);
         await unlink(filePath).catch(() => { });
 
@@ -146,5 +182,6 @@ export async function processDocument(
         throw error;
     } finally {
         await client.end();
+        await documentIndexQueue.close();
     }
 }

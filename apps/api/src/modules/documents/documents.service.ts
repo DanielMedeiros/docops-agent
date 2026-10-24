@@ -3,7 +3,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { db } from "../../db.js";
 import { config } from "../../config.js";
-import { documentQueue } from "../../../../worker/src/queue.js";
+import { documentQueue } from "./document-index.queue.js";
 import type { UploadDocumentInput } from "./documents.schemas.js";
 
 export interface DocumentRow {
@@ -86,6 +86,7 @@ export async function uploadDocument(
 
     await documentQueue.add("process-document", {
         documentId: document.id,
+        organizationId,
         storedName: document.storedName,
         mimeType: document.mimeType,
     });

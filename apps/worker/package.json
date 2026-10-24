@@ -6,7 +6,8 @@
     "scripts": {
         "dev": "tsx watch src/worker.ts",
         "start": "tsx src/worker.ts",
-        "typecheck": "tsc --noEmit"
+        "typecheck": "tsc --noEmit",
+        "index:existing": "tsx src/scripts/index-existing-documents.ts"
     },
     "dependencies": {
         "bullmq": "^5.81.5",

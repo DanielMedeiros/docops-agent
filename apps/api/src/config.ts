@@ -21,6 +21,8 @@ const configSchema = z.object({
 
     DATABASE_URL: z.string().min(1),
 
+    REDIS_URL: z.string().default("redis://localhost:6379"),
+
     JWT_SECRET: z
         .string()
         .min(32, "JWT_SECRET deve possuir pelo menos 32 caracteres"),
@@ -30,6 +32,12 @@ const configSchema = z.object({
     CORS_ORIGIN: z.string().default("*"),
 
     UPLOAD_DIR: z.string().default("./uploads"),
+
+    OPENAI_API_KEY: z.string().min(1),
+
+    OPENAI_EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
+
+    OPENAI_CHAT_MODEL: z.string().default("gpt-4o-mini"),
 
     LOG_LEVEL: z
         .enum(["fatal", "error", "warn", "info", "debug", "trace"])

@@ -15,6 +15,7 @@ import { findUserById } from "./modules/auth/auth.service.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { usersRoutes } from "./modules/users/users.routes.js";
 import { documentsRoutes } from "./modules/documents/documents.routes.js";
+import { ragRoutes } from "./modules/rag/rag.routes.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
     const app = Fastify({
@@ -88,6 +89,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     app.register(authRoutes, { prefix: "/auth" });
     app.register(usersRoutes, { prefix: "/users" });
     app.register(documentsRoutes, { prefix: "/documents" });
+    app.register(ragRoutes, { prefix: "/rag" });
 
     app.setErrorHandler((error, request, reply) => {
         if (error instanceof ZodError) {

@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  uploaded_by UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+  uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
   original_name VARCHAR(500) NOT NULL,
   stored_name VARCHAR(500) NOT NULL,
   mime_type VARCHAR(100) NOT NULL,

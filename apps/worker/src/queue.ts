@@ -1,12 +1,20 @@
 import { Queue } from "bullmq";
 import { config } from "./config.js";
 
+const redisUrl = new URL(config.REDIS_URL);
+
 export const documentQueue = new Queue("document-processing", {
-    connection: { url: config.REDIS_URL },
-    defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 2000 },
-        removeOnComplete: { age: 3600 * 24 },
-        removeOnFail: { age: 3600 * 24 * 7 },
-    },
+  connection: {
+    host: redisUrl.hostname,
+    port: Number(redisUrl.port || 6379),
+    username: redisUrl.username || undefined,
+    password: redisUrl.password || undefined,
+    maxRetriesPerRequest: null,
+  },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: { age: 86_400 },
+    removeOnFail: { age: 604_800 },
+  },
 });
