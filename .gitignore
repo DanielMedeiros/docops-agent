@@ -1,6 +1,7 @@
 
 #general
 
+.agents/
 dist/
 build/
 .env

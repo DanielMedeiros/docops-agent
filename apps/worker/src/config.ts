@@ -12,6 +12,8 @@ loadEnv({ path: rootEnvPath });
 const configSchema = z.object({
     DATABASE_URL: z.string().min(1),
     REDIS_URL: z.string().min(1),
+    OPENAI_API_KEY: z.string().min(1),
+    OPENAI_EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
     UPLOAD_DIR: z.string().default("./uploads"),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
