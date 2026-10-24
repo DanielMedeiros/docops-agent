@@ -11,7 +11,7 @@
     },
     "dependencies": {
         "bullmq": "^5.81.5",
-        "dotenv": "^16.6.1",
+        "dotenv": "^18.0.8",
         "ioredis": "^5.11.1",
         "openai": "^7.39.0",
         "pg": "^8.13.1",
